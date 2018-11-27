@@ -65,6 +65,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="initialize_script.sql" />
     <Compile Include="ProgressBar.cs" />
     <Compile Include="IMyDeque.cs" />
     <Compile Include="MyDeque.cs" />

@@ -1,15 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Oracle.DataAccess.Client;
 using System.Data;
 using System.IO;
 using System.Security.Cryptography;
-using System.Collections;
 using System.Threading;
-
+using System.Configuration;
 
 namespace sibintec_test
 {
@@ -18,7 +14,7 @@ namespace sibintec_test
         public static MyDeque<FileObject> array_1 = new MyDeque<FileObject>();
         public static MyDeque<FileObject> array_2 = new MyDeque<FileObject>();
         static object locker = new object();
-        static string defaultFolder = @"D:\\My documentos\";
+        static string defaultFolder;
         public static int filesCount = 0;
         public static int queueProgress = 0;
         public static int recordsSaved;
@@ -28,13 +24,15 @@ namespace sibintec_test
 
         static void Main(string[] args)
         {
+            Console.WriteLine("START");
             timer = DateTime.Now;
+            Configuration config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+            defaultFolder = config.AppSettings.Settings["folderForWork"].Value;
 
             MyDeque<string> foldersArray = new MyDeque<string>();
             foldersArray.EnqueueLast(defaultFolder);
             foreach(string folderPath in args)
                 foldersArray.EnqueueLast(folderPath);
-            foldersArray.EnqueueLast(@"D:\\VIDEO\");
 
             Thread firstThread = new Thread(new ParameterizedThreadStart(GetFiles));
             firstThread.Name = "Поток 1 для сбора файлов";
@@ -52,55 +50,21 @@ namespace sibintec_test
             fourthThread.Name = "Поток 4 для вывода общего прогресса работы";
             fourthThread.Start();
 
-
-            Console.Read();
-
-
-            //Console.ReadKey();
-            /*
-                var connString = "Data Source=ORCL;User Id=oracle_user;Password=oracle_pass;Enlist=false;DBA Privilege=SYSDBA";
-                var strSQL = "UPDATE SYS.FILES_CONTENT SET FILES_CONTENT_HASH = 'sfhbsdfb' WHERE FILES_CONTENT_ID = 1;"; //and reason='П01'
-                using (OracleConnection conn = new OracleConnection(connString))
-                {
-                    conn.Open();
-                    using (OracleCommand cmd = new OracleCommand(strSQL, conn))
-                    using (OracleTransaction tx = conn.BeginTransaction(IsolationLevel.ReadCommitted))
-                    {
-                        try
-                        {
-                            if (cmd.ExecuteNonQuery() < 0)
-                            {
-                                throw new Exception("Unable to set id_package");
-                            }
-                            else
-                            {
-                                tx.Commit();
-                            }
-                        }
-                        catch (Exception e)
-                        {
-                            tx.Rollback();
-                        }
-                    }
-
-                    var key = Console.ReadKey();
-
-                }
-                */
+            Console.ReadKey();
         }
 
 
 
         public static void GetFiles(object foldersForOperate)
         {
-            //Console.WriteLine("Запущен {0}", Thread.CurrentThread.Name);
+            Console.WriteLine("Запущен {0}", Thread.CurrentThread.Name);
             MyDeque<string> files = new MyDeque<string>();
             string[] filesInFolder;
             string localFileName;
 
             foreach (string folderPath in (MyDeque<string>)foldersForOperate)
             {
-                filesInFolder = new DirectoryInfo(folderPath).GetFiles("*.*", SearchOption.AllDirectories).Select(f => f.FullName).ToArray();
+                filesInFolder = new DirectoryInfo(folderPath).GetFiles("*", SearchOption.AllDirectories).Select(f => f.FullName).ToArray();
                 foreach (string fullPath in filesInFolder)
                 {
                     files.EnqueueLast(fullPath);
@@ -124,13 +88,13 @@ namespace sibintec_test
                 array_1.EnqueueFirst(new FileObject() { stopThread = true });
             }
             
-            //Console.WriteLine("{0} завершает работу", Thread.CurrentThread.Name);
+            Console.WriteLine("{0} завершает работу", Thread.CurrentThread.Name);
             Thread.CurrentThread.Abort();
         }
 
         static public void HashCalculate()
         {
-            //Console.WriteLine("Запущен {0}", Thread.CurrentThread.Name);
+            Console.WriteLine("Запущен {0}", Thread.CurrentThread.Name);
             FileObject fileObject;
             bool stopThreadSignal = false;
             MyDeque<FileObject> localStorage = new MyDeque<FileObject>();
@@ -182,7 +146,7 @@ namespace sibintec_test
                 array_2.EnqueueFirst(new FileObject() { stopThread = true });
             }
 
-            //Console.WriteLine("{0} завершает работу. Успешно обработано {1} файлов, ошибок возникло {2}", Thread.CurrentThread.Name, handledFiles, raisedErrors);
+            Console.WriteLine("{0} завершает работу", Thread.CurrentThread.Name);
             Thread.CurrentThread.Abort();
 
         }
@@ -190,8 +154,13 @@ namespace sibintec_test
 
         static public void RecordsSave()
         {
+            Console.WriteLine("Запущен {0}", Thread.CurrentThread.Name);
+            string connString = "Data Source=ORCL;User Id=sibintech_normal;Password=sibintech_pass;Enlist=false;";
             FileObject objectToSave;
+            string[] stringParams = new string[2];
             bool stopThreadSignal = false;
+
+            stringParams[0] = connString;
 
             do
             {
@@ -212,7 +181,13 @@ namespace sibintec_test
                     {
                         try
                         {
+                            string strSQL = String.Format("INSERT INTO SIBINTECH_NORMAL.FILES_CONTENT (FILE_NAME, FILE_PATH, FILE_HASH, FILE_ERROR) VALUES ('{0}', '{1}', '{2}', '{3}')", objectToSave.fileName, objectToSave.filePath, objectToSave.fileHash, objectToSave.fileError);
+                            //Console.WriteLine(strSQL);
+                            stringParams[1] = strSQL;
+                            bool saveResult = ExecuteSqlQuery(stringParams);
                             recordsSaved++;
+                            if (!saveResult)
+                                errorRaised++;
                         }
                         catch (Exception e)
                         {
@@ -229,7 +204,7 @@ namespace sibintec_test
             }
             while (stopThreadSignal == false);
 
-            //Console.WriteLine("{0} завершает работу. Успешно создано {1} записей в БД", Thread.CurrentThread.Name, savedRecords);
+            Console.WriteLine("{0} завершает работу", Thread.CurrentThread.Name);
             Thread.CurrentThread.Abort();
         }
 
@@ -242,6 +217,41 @@ namespace sibintec_test
                 string result = BitConverter.ToString(checkSum).Replace("-", String.Empty);
                 return result;
             }
+        }
+
+        static public bool ExecuteSqlQuery(string[] stringParams)
+        {
+            string connString = stringParams[0];
+            string sqlQuery = stringParams[1];
+
+            using (OracleConnection conn = new OracleConnection(connString))
+            {
+                conn.Open();
+                using (OracleCommand cmd = new OracleCommand(sqlQuery, conn))
+                using (OracleTransaction tx = conn.BeginTransaction(IsolationLevel.ReadCommitted))
+                {
+                    try
+                    {
+                        if (cmd.ExecuteNonQuery() < 0)
+                        {
+                            //throw new Exception("Unable to set id_package");
+                            return false;
+                        }
+                        else
+                        {
+                            tx.Commit();
+                            return true;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        tx.Rollback();
+                        return false;
+                    }
+                }
+
+            }
+
         }
 
         static public void ShowProgress()
@@ -269,10 +279,6 @@ namespace sibintec_test
             Console.WriteLine("Ошибок произошло: {0}", errorRaised);
             Console.WriteLine("Время, затраченное на работу: {0}", timeElapsed);
 
-            //public static int filesCount = 1;
-            //public static int queueProgress = 0;
-            //public static int recordsSaved;
-            //public static int errorRaised;
             Thread.CurrentThread.Abort();
         }
 
